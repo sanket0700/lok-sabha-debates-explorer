@@ -82,7 +82,17 @@ def translate_batch(texts: list[str], src_lang: str = "hin_Deva", tgt_lang: str 
         inputs = {k: v.to(device) for k, v in inputs.items()}
     with torch.no_grad():
         generated = _model.generate(
-            **inputs, use_cache=True, min_length=0, max_length=256, num_beams=NUM_BEAMS
+            **inputs, use_cache=True, min_length=0, max_length=256, num_beams=NUM_BEAMS,
+            # Greedy decoding (num_beams=1) has a well-known degenerate-
+            # repetition failure mode, confirmed on real corpus data: a
+            # short repeated source phrase ("शांति: शांति: शांति:", a
+            # ceremonial refrain) produced ~20 repetitions of the same
+            # untranslated token before the model recovered. Blocking
+            # repeated 3-grams + a repetition penalty fixes this at
+            # essentially no memory cost, unlike raising num_beams (which
+            # was reduced to 1 specifically to fit this machine's 16GB, see
+            # NUM_BEAMS's comment above).
+            no_repeat_ngram_size=3, repetition_penalty=1.2,
         )
     decoded = _tokenizer.batch_decode(generated, skip_special_tokens=True)
     result = _processor.postprocess_batch(decoded, lang=tgt_lang)
@@ -97,7 +107,12 @@ def translate_batch(texts: list[str], src_lang: str = "hin_Deva", tgt_lang: str 
     return result
 
 
-def run(lok_sabha_number: int | None, limit: int | None, batch_size: int = 16):
+def run(
+    lok_sabha_number: int | None,
+    limit: int | None,
+    batch_size: int = 16,
+    sitting_ids: list[int] | None = None,
+):
     with get_conn() as conn:
         # English-only speeches: pass through, no model call needed.
         execute(
@@ -106,8 +121,9 @@ def run(lok_sabha_number: int | None, limit: int | None, batch_size: int = 16):
             update speeches set text_english = text_original
             where text_english is null and language = 'en'
               and (%s is null or sitting_id in (select id from sittings where lok_sabha_number = %s))
+              and (%s is null or sitting_id = any(%s))
             """,
-            (lok_sabha_number, lok_sabha_number),
+            (lok_sabha_number, lok_sabha_number, sitting_ids, sitting_ids),
         )
         conn.commit()
 
@@ -119,6 +135,14 @@ def run(lok_sabha_number: int | None, limit: int | None, batch_size: int = 16):
         if lok_sabha_number is not None:
             query += " and sitting_id in (select id from sittings where lok_sabha_number = %s)"
             params.append(lok_sabha_number)
+        # --sitting-id: lets multiple concurrent processes (e.g. separate VMs
+        # sharing one DB) split the translation backlog by sitting without
+        # racing on the same rows — each process claims a disjoint set of
+        # sitting_ids, so idempotent "text_english is null" filtering never
+        # causes two processes to redo each other's work.
+        if sitting_ids:
+            query += " and sitting_id = any(%s)"
+            params.append(sitting_ids)
         query += " order by id"
         if limit is not None:
             query += " limit %s"
@@ -159,12 +183,13 @@ def run(lok_sabha_number: int | None, limit: int | None, batch_size: int = 16):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--lok-sabha", type=int, default=None)
+    parser.add_argument("--sitting-id", type=int, action="append", default=None)
     parser.add_argument("--limit", type=int, default=None)
     parser.add_argument("--batch-size", type=int, default=16)
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args()
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO)
-    run(args.lok_sabha, args.limit, args.batch_size)
+    run(args.lok_sabha, args.limit, args.batch_size, args.sitting_id)
 
 
 if __name__ == "__main__":
