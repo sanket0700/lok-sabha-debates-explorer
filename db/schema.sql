@@ -87,6 +87,26 @@ create table if not exists locations (
     geocoded_at         timestamptz not null default now()
 );
 
+-- Persists Nominatim results across pipeline runs, keyed by the exact place
+-- string looked up and which of the two geocoding passes it came from
+-- (pipeline/enrich_geocode.py's India-restricted pass vs. worldwide
+-- fallback share a place_name but can legitimately have different
+-- results/no-results, so they're cached separately). A NULL
+-- formatted_address is a cached "no match found" — distinct from no row at
+-- all, which means "never looked up". Without this, every full re-run
+-- re-fetches every place from scratch even if only a handful of new
+-- entities were added — cost ~10 hours across 4 iterative re-runs during
+-- pilot validation before this table existed.
+create table if not exists geocode_cache (
+    place_name          text not null,
+    pass                text not null,                -- 'india' or 'worldwide'
+    formatted_address   text,
+    lat                 double precision,
+    lon                 double precision,
+    resolved_at         timestamptz not null default now(),
+    primary key (place_name, pass)
+);
+
 create table if not exists topics (
     id                  serial primary key,
     name                text not null unique          -- fixed taxonomy, see pipeline/config.py

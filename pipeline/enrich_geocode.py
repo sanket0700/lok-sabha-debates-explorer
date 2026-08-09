@@ -1,11 +1,16 @@
 """Stage 5b: geocode place-like entities (GPE/LOC/FAC) via Nominatim.
 
 Same free, no-API-key geocoder the old repo used (it also tried the paid
-Google Maps API — dropped here per the "no paid API" decision). An
-in-process cache avoids re-geocoding the same place name twice within a
-run, since many entities share a canonical_text (e.g. "India" mentioned in
-hundreds of speeches) — mirrors the old repo's dedup-by-address approach,
-just applied to outgoing requests instead of only to the output CSV.
+Google Maps API — dropped here per the "no paid API" decision). Two layers
+of caching: an in-process dict avoids repeat lookups within a single run
+(many entities share a canonical_text, e.g. "India" mentioned in hundreds
+of speeches), and the `geocode_cache` table (db/schema.sql) persists every
+resolved (or confirmed-unresolved) place *across* runs — without it, every
+full re-run re-fetches every place from scratch even when only a handful
+of new entities were added. This wasn't here for the pilot's own iteration
+(threshold/stopword tuning needed 4 full re-runs, ~10 hours of redundant
+re-fetching total) — added specifically so future re-tuning doesn't repeat
+that cost.
 
 Idempotent: only processes entities of a geocodable type with no row yet in
 `locations`.
@@ -24,7 +29,7 @@ from pipeline.config import (
     NOMINATIM_REQUEST_DELAY_SECONDS,
     NOMINATIM_USER_AGENT,
 )
-from pipeline.db import execute, fetch_all, get_conn
+from pipeline.db import execute, fetch_all, fetch_one, get_conn
 
 log = logging.getLogger("pipeline.enrich_geocode")
 
@@ -96,7 +101,48 @@ def _search(place: str, countrycodes: str | None):
     return resp.json()
 
 
-def geocode(place: str):
+def _cached_pass(conn, place: str, pass_name: str, countrycodes: str | None, threshold: float):
+    """One geocoding pass (india/worldwide), persisted in geocode_cache.
+
+    A row with formatted_address IS NULL means "already looked up, no
+    match" — distinct from no row at all ("never looked up"), so a
+    confirmed-empty result doesn't get re-fetched on the next run either.
+    Only writes to the persistent cache on a *completed* lookup — a
+    RequestException propagates to the caller uncached, so a transient
+    network failure gets retried on the next run rather than being baked
+    in as a permanent "no match".
+    """
+    cached = fetch_one(
+        conn,
+        "select formatted_address, lat, lon from geocode_cache where place_name = %s and pass = %s",
+        (place, pass_name),
+    )
+    if cached is not None:
+        if cached["formatted_address"] is None:
+            return None
+        return (cached["formatted_address"], cached["lat"], cached["lon"])
+
+    matches = _search(place, countrycodes)
+    good = [r for r in matches if float(r.get("importance", 0)) >= threshold]
+    result = None
+    if good:
+        top = good[0]
+        result = (top["display_name"], float(top["lat"]), float(top["lon"]))
+
+    execute(
+        conn,
+        """
+        insert into geocode_cache (place_name, pass, formatted_address, lat, lon)
+        values (%s, %s, %s, %s, %s)
+        on conflict (place_name, pass) do nothing
+        """,
+        (place, pass_name, result[0] if result else None, result[1] if result else None, result[2] if result else None),
+    )
+    conn.commit()
+    return result
+
+
+def geocode(conn, place: str):
     """Two-pass: India-restricted first, worldwide fallback second.
 
     Every entity here comes from an Indian Lok Sabha debate transcript, so most
@@ -116,22 +162,15 @@ def geocode(place: str):
         _cache[place] = None
         return None
 
-    def _good(matches, threshold):
-        return [r for r in matches if float(r.get("importance", 0)) >= threshold]
-
-    results = []
+    result = None
     try:
-        results = _good(_search(place, countrycodes="in"), MIN_IMPORTANCE)
-        if not results:
-            results = _good(_search(place, countrycodes=None), WORLDWIDE_MIN_IMPORTANCE)
+        result = _cached_pass(conn, place, "india", countrycodes="in", threshold=MIN_IMPORTANCE)
+        if result is None:
+            result = _cached_pass(conn, place, "worldwide", countrycodes=None, threshold=WORLDWIDE_MIN_IMPORTANCE)
     except requests.RequestException as exc:
         log.warning("geocode failed for %r: %s", place, exc)
-        results = []
+        result = None
 
-    result = None
-    if results:
-        top = results[0]
-        result = (top["display_name"], float(top["lat"]), float(top["lon"]))
     _cache[place] = result
     return result
 
@@ -154,7 +193,7 @@ def run(limit: int | None):
         log.info("geocoding %d entity mentions", len(rows))
 
         for i, row in enumerate(rows):
-            result = geocode(row["canonical_text"])
+            result = geocode(conn, row["canonical_text"])
             if result is not None:
                 formatted_address, lat, lon = result
                 execute(
