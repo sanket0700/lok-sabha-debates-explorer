@@ -142,10 +142,71 @@ def ensure_tessdata_best() -> Path:
     return TESSDATA_BEST_DIR
 
 
+def _format_table(rows: list[list]) -> str:
+    lines = []
+    for row in rows:
+        cells = [str(c).replace("\n", " ").strip() for c in row if c is not None]
+        cells = [c for c in cells if c]
+        if cells:
+            lines.append(" | ".join(cells))
+    return "\n".join(lines)
+
+
+def _extract_page_text(page: fitz.Page) -> str:
+    """Text extraction that keeps government annexure tables (state-wise
+    budget figures, RTI/audit-report entries — common in "Written Answers"
+    sittings, confirmed present in LS18's largest sittings) in correct
+    reading order.
+
+    Plain page.get_text() flattens table cells by raw block position, which
+    for genuinely tabular content produces two distinct failure modes
+    confirmed by hand: a wrapped footnote fragment sorting ahead of a
+    same-row column physically to its right, and word-by-word-wrapped
+    narrow columns flattening into unreadable word-salad with no coherent
+    order at all (~17-20% of pages in LS18's two largest sittings, sampled).
+    find_tables() does structural table detection (not just block position)
+    and resolves both — only used on pages where it actually finds a table;
+    normal prose pages go through the plain path unchanged.
+    """
+    tables = page.find_tables()
+    if not tables.tables:
+        return page.get_text()
+
+    table_bboxes = [fitz.Rect(t.bbox) for t in tables.tables]
+
+    def _mostly_inside_a_table(rect: fitz.Rect) -> bool:
+        for tb in table_bboxes:
+            if not tb.intersects(rect):
+                continue
+            if rect.get_area() > 0 and (tb & rect).get_area() / rect.get_area() > 0.5:
+                return True
+        return False
+
+    # (y0, x0, text) so a normal top-to-bottom/left-to-right sort places
+    # each table's formatted text at the position it visually occupies,
+    # instead of at wherever its individual constituent blocks happened to
+    # land.
+    pieces = []
+    for b in page.get_text("blocks"):
+        rect = fitz.Rect(b[:4])
+        if _mostly_inside_a_table(rect):
+            continue
+        if b[4].strip():
+            pieces.append((b[1], b[0], b[4]))
+
+    for table, bbox in zip(tables.tables, table_bboxes):
+        formatted = _format_table(table.extract())
+        if formatted.strip():
+            pieces.append((bbox.y0, bbox.x0, formatted + "\n"))
+
+    pieces.sort(key=lambda p: (p[0], p[1]))
+    return "\n".join(p[2] for p in pieces)
+
+
 def extract_text_layer(pdf_path: Path) -> str:
     doc = fitz.open(pdf_path)
     try:
-        return "\n".join(page.get_text() for page in doc)
+        return "\n".join(_extract_page_text(page) for page in doc)
     finally:
         doc.close()
 
