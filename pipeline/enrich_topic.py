@@ -67,8 +67,13 @@ def run(lok_sabha_number: int | None, limit: int | None, batch_size: int = 8):
 
         for i in range(0, len(rows), batch_size):
             batch = rows[i : i + batch_size]
-            texts = [r["text_english"][:1500] for r in batch]  # truncate: NLI models have short limits
-            results = classifier(texts, candidate_labels=TOPIC_TAXONOMY, multi_label=True)
+            texts = [r["text_english"] for r in batch]
+            # Token-based truncation (model_max_length=1024 for
+            # facebook/bart-large-mnli), not the old 1500-char slice —
+            # confirmed by hand that a ~375-token budget (roughly what
+            # 1500 chars gives in English) left well under half the
+            # model's real 1024-token context unused for longer speeches.
+            results = classifier(texts, candidate_labels=TOPIC_TAXONOMY, multi_label=True, truncation=True)
             if isinstance(results, dict):
                 results = [results]
 
