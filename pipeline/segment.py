@@ -55,17 +55,45 @@ SPEAKER_TITLES = (
     r"SHRI|SHRIMATI|SMT\.?|DR\.?|KUMARI|PROF\.?|MR\.?|MRS\.?|MS\.?|"
     r"THE\s+MINISTER\s+OF[^:\n]{0,60}|THE\s+DEPUTY\s+SPEAKER|THE\s+SPEAKER|"
     r"MR\.?\s+SPEAKER|MADAM\s+SPEAKER|MR\.?\s+CHAIRMAN|"
+    # "HON. SPEAKER:"/"SECRETARY-GENERAL:" are distinct printed labels from
+    # "MR. SPEAKER"/"THE SPEAKER" already above — found missing by the
+    # segmentation accuracy audit (confirmed real, frequent: e.g. 24
+    # occurrences of "HON. SPEAKER:" in one otherwise-clean LS16 sitting,
+    # each one previously silently bleeding into whichever speech matched
+    # immediately before it instead of being its own turn).
+    r"HON\.?\s+SPEAKER|HON\.?\s+DEPUTY\s+SPEAKER|HON\.?\s+CHAIRMAN|HON\.?\s+CHAIRPERSON|"
+    r"SECRETARY[\s-]?GENERAL|"
     # Hindi-script honorifics — speaker turns attributed in Devanagari (own
     # name written in Hindi rather than transliterated) were previously
     # invisible to this pattern and got silently absorbed into whichever
     # preceding English-labeled speech was still "open".
-    r"श्रीमती|श्री|डॉ[०.]?|कुमारी|प्रो[०.]?|माननीय\s+अध्यक्ष|अध्यक्ष\s+महोदय"
+    # माननीय सभापति / सभापति महोदय (Chairperson, used when someone other than
+    # the Speaker is presiding) is the same class of gap as अध्यक्ष below —
+    # confirmed 93 occurrences in one LS17 sitting alone, previously all
+    # silently bled into the preceding matched speaker.
+    r"श्रीमती|श्री|डॉ[०.]?|कुमारी|प्रो[०.]?|"
+    r"माननीय\s+अध्यक्ष|अध्यक्ष\s+महोदय|माननीय\s+सभापति|सभापति\s+महोदय"
 )
 SPEAKER_PATTERN = re.compile(
     rf"(?P<speaker>(?:{SPEAKER_TITLES})[A-Za-zऀ-ॿ.,'()\-\d ]{{0,80}}?)\s*:\s*",
 )
 
 DEVANAGARI = re.compile(r"[ऀ-ॿ]")
+# Real Devanagari letters/vowel-signs only, excluding danda punctuation
+# (। ॥, U+0964-0965), digits (०-९, U+0966-096F), and the abbreviation
+# sign (U+0970) — used only by detect_language(), not the broader
+# DEVANAGARI pattern above (which stays intentionally inclusive for
+# extract.py's OCR-trigger decision, a different and legitimately
+# conservative use case). Confirmed by hand: every speech in the corpus
+# whose only "Devanagari" content was digits/danda (a Devanagari-numeral
+# footnote marker, "।, ॥" used like Roman numerals "I, II") had zero real
+# Hindi content — these were misclassified as language='mixed' and sent
+# through the Hindi->English translation model, which can catastrophically
+# corrupt long English/tabular content it was never meant to touch
+# (confirmed: a large government-answer data table lost an entire state's
+# row and degenerated into repeated-token loops after being needlessly
+# translated over a single stray digit).
+DEVANAGARI_LETTER = re.compile(r"[ऀ-ॣॱ-ॿ]")
 
 MIN_SEGMENT_CHARS = 8
 MAX_SPEAKER_CHARS = 90
@@ -120,7 +148,7 @@ def clean_speech_text(text: str) -> str:
 
 
 def detect_language(text: str) -> str:
-    devanagari_chars = len(DEVANAGARI.findall(text))
+    devanagari_chars = len(DEVANAGARI_LETTER.findall(text))
     if devanagari_chars == 0:
         return "en"
     if devanagari_chars / max(len(text), 1) > 0.15:
@@ -244,7 +272,23 @@ def segment_sitting_text(raw_text: str):
         # speaker-marker-free sitting) doesn't silently lose everything past
         # the first chunk.
         for i in range(0, len(merged), LLM_CHUNK_CHARS):
-            final_segments.extend(llm_segment_chunk(merged[i : i + LLM_CHUNK_CHARS]))
+            chunk = merged[i : i + LLM_CHUNK_CHARS]
+            if SPEAKER_PATTERN.search(chunk) is None:
+                # No recognizable speaker-label boundary anywhere in this
+                # window — genuinely continuous unlabeled prose (a President's
+                # Address paragraph windowed arbitrarily at LLM_CHUNK_CHARS,
+                # confirmed by the segmentation audit: entire sittings with
+                # zero SPEAKER_PATTERN matches had EVERY window like this).
+                # Asking the LLM to "identify each speaker" here has been
+                # observed, on real sittings, to hallucinate plausible-looking
+                # but fabricated speaker names (a single dictionary word, a
+                # historical figure being quoted within the speech, a vocative
+                # phrase like "Honorable Members") instead of reporting null
+                # as instructed — so skip the LLM call and keep this as one
+                # unattributed segment rather than trusting invented splits.
+                final_segments.append((None, chunk))
+            else:
+                final_segments.extend(llm_segment_chunk(chunk))
         ambiguous_run.clear()
 
     for speaker, text in rough_segments:
