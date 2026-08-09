@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}Explore — Lok Sabha Debates{% endblock %}
+{% block content %}
+<div class="card">
+    <h1>Explore</h1>
+    <form id="search-form" hx-get="/explore/search" hx-target="#results" hx-trigger="keyup changed delay:400ms from:#q, change from:.filter">
+        <div class="filters">
+            <input type="search" id="q" name="q" placeholder="Search speeches (e.g. minimum support price)" style="flex: 1 1 320px;" autofocus>
+            <select name="mode" class="filter">
+                <option value="hybrid" selected>Hybrid</option>
+                <option value="keyword">Keyword</option>
+                <option value="semantic">Semantic</option>
+            </select>
+            <select name="lok_sabha" class="filter">
+                <option value="">Any Lok Sabha</option>
+                <option value="16">16th</option>
+                <option value="17">17th</option>
+            </select>
+            <select name="language" class="filter">
+                <option value="">Any language</option>
+                <option value="en">English</option>
+                <option value="hi">Hindi</option>
+                <option value="mixed">Mixed</option>
+            </select>
+            <input type="text" name="speaker" class="filter" placeholder="Speaker name contains…">
+        </div>
+    </form>
+    <div id="results">
+        <p class="muted">Start typing to search the corpus.</p>
+    </div>
+</div>
+
+<div class="card">
+    <h2>Ask a question</h2>
+    <p class="muted">Answers are grounded in retrieved speeches only, with citations back to source sittings.</p>
+    <form hx-post="/explore/ask" hx-target="#answer" hx-swap="innerHTML">
+        <div class="filters">
+            <input type="text" name="question" placeholder="e.g. What has been said about the minimum support price for wheat?" style="flex: 1 1 400px;">
+            <button type="submit">Ask</button>
+        </div>
+    </form>
+    <div id="answer"></div>
+</div>
+{% endblock %}

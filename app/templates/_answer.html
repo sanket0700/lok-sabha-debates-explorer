@@ -1,0 +1,22 @@
+{% if asked %}
+<div class="card" style="margin-top: 1rem;">
+    <p class="muted">Q: {{ question }}</p>
+    <p style="white-space: pre-wrap;">{{ answer }}</p>
+    {% if sources %}
+    <details>
+        <summary>{{ sources|length }} source speech{{ 'es' if sources|length != 1 else '' }}</summary>
+        {% for s in sources %}
+        <div class="speech">
+            <div class="speech-meta">
+                <strong>{{ s.speaker_raw or "Unknown speaker" }}</strong>
+                &middot; Lok Sabha {{ s.lok_sabha_number }}
+                &middot; {{ s.sitting_date or "date unknown" }}
+                {% if s.source_pdf_url %}&middot; <a href="{{ s.source_pdf_url }}" target="_blank" rel="noopener">source PDF</a>{% endif %}
+            </div>
+            <div>{{ (s.text_english or s.text_original)[:300] }}&hellip;</div>
+        </div>
+        {% endfor %}
+    </details>
+    {% endif %}
+</div>
+{% endif %}

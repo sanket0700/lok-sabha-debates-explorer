@@ -1,0 +1,67 @@
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: loksabha
+      POSTGRES_PASSWORD: loksabha
+      POSTGRES_DB: loksabha
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./db/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    ports:
+      - "5433:5432"  # 5432 was already taken by an unrelated container on this host
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U loksabha"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Docker Desktop on macOS can't pass the host GPU through to a Linux
+  # container, so on Apple Silicon / any machine where you want Metal or
+  # CUDA acceleration, run Ollama natively (e.g. `brew install ollama`)
+  # instead of this service — it's opt-in via the "docker-ollama" profile
+  # for Linux hosts with GPU passthrough configured, or CPU-only use.
+  ollama:
+    image: ollama/ollama:latest
+    profiles: ["docker-ollama"]
+    volumes:
+      - ollama_models:/root/.ollama
+    ports:
+      - "11434:11434"
+
+  app:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://loksabha:loksabha@db:5432/loksabha
+      # Assumes a natively-running Ollama on the host (see note above).
+      # Using the docker-ollama profile instead? Override to http://ollama:11434.
+      OLLAMA_HOST: http://host.docker.internal:11434
+    ports:
+      - "8000:8000"
+
+  # One-off pipeline runs. Same GPU-passthrough caveat as the ollama service
+  # above applies — on macOS, prefer running pipeline stages natively in a
+  # venv (see README) so PyTorch can use the mps device. This service is
+  # here as a CPU-only fallback / for Linux hosts with GPU passthrough:
+  #   docker compose run --rm pipeline python -m pipeline.run status
+  #   docker compose run --rm pipeline python -m pipeline.run scrape --lok-sabha 16 --limit 20
+  pipeline:
+    build: .
+    profiles: ["pipeline"]
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://loksabha:loksabha@db:5432/loksabha
+      OLLAMA_HOST: http://host.docker.internal:11434
+      DATA_DIR: /srv/data
+    volumes:
+      - ./data:/srv/data
+    entrypoint: ["python"]
+
+volumes:
+  pgdata:
+  ollama_models:

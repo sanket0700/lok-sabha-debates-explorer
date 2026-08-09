@@ -1,0 +1,24 @@
+# Shared by pipeline/ and app/ — one environment for a project this size.
+
+# -- pipeline: scrape/extract --
+requests==2.32.3
+beautifulsoup4==4.12.3
+PyMuPDF==1.24.11          # fitz
+
+# -- pipeline + app: storage --
+psycopg2-binary==2.9.9
+pgvector==0.3.6
+
+# -- pipeline: local models --
+torch==2.4.1
+transformers==4.45.2
+sentencepiece==0.2.0      # tokenizer dep for IndicTrans2
+spacy==3.7.5
+sentence-transformers==3.1.1
+IndicTransToolkit==1.1.1
+
+# -- app --
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+jinja2==3.1.4
+python-multipart==0.0.12  # Form(...) parsing

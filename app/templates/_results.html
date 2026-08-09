@@ -1,0 +1,19 @@
+{% if not searched %}
+<p class="muted">Start typing to search the corpus.</p>
+{% elif not results %}
+<p class="muted">No speeches matched &ldquo;{{ q }}&rdquo;.</p>
+{% else %}
+<p class="muted">{{ results|length }} result{{ 's' if results|length != 1 else '' }} for &ldquo;{{ q }}&rdquo;</p>
+{% for r in results %}
+<div class="speech">
+    <div class="speech-meta">
+        <strong>{{ r.speaker_raw or "Unknown speaker" }}</strong>
+        &middot; Lok Sabha {{ r.lok_sabha_number }}
+        &middot; {{ r.sitting_date or "date unknown" }}
+        &middot; {{ r.language }}
+        {% if r.source_pdf_url %}&middot; <a href="{{ r.source_pdf_url }}" target="_blank" rel="noopener">source PDF</a>{% endif %}
+    </div>
+    <div>{{ (r.text_english or r.text_original)[:400] }}{% if (r.text_english or r.text_original)|length > 400 %}&hellip;{% endif %}</div>
+</div>
+{% endfor %}
+{% endif %}

@@ -1,0 +1,197 @@
+{% extends "base.html" %}
+{% block title %}Insights — Lok Sabha Debates{% endblock %}
+{% block head %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>#map { height: 420px; border-radius: 8px; }</style>
+{% endblock %}
+{% block content %}
+<div class="card">
+    <h1>Insights</h1>
+    <form class="filters">
+        <select name="lok_sabha" onchange="window.location = '/insights' + (this.value ? '?lok_sabha=' + this.value : '')">
+            <option value="" {{ "selected" if not lok_sabha }}>All Lok Sabhas (pilot)</option>
+            {% for ls in lok_sabha_numbers %}
+            <option value="{{ ls }}" {{ "selected" if lok_sabha == ls }}>Lok Sabha {{ ls }}</option>
+            {% endfor %}
+        </select>
+    </form>
+    {% if not has_data %}
+    <p class="muted">No aggregate data yet — run the pipeline through <code>aggregate</code> first (see README).</p>
+    {% endif %}
+</div>
+
+<div class="card">
+    <h2>Topic attention over time</h2>
+    <p class="muted">Top {{ 8 }} issues by total mentions, monthly, against the fixed issue taxonomy.</p>
+    <canvas id="topic-chart" height="110"></canvas>
+    <details>
+        <summary>View as table</summary>
+        <div id="topic-table"></div>
+    </details>
+</div>
+
+<div class="card">
+    <h2>Sentiment / tone over time</h2>
+    <p class="muted">Share of speeches per month that are positive, neutral, or negative in tone
+    — a composition view rather than a single averaged score, since one ceremonial address or one
+    adversarial debate day can otherwise dominate a whole month's average at this corpus size,
+    and opposite-toned speeches within the same month can cancel each other out in a mean.</p>
+    <canvas id="sentiment-chart" height="90"></canvas>
+</div>
+
+<div class="card">
+    <h2>Most-mentioned entities</h2>
+    <canvas id="entity-chart" height="140"></canvas>
+    <details>
+        <summary>View as table</summary>
+        <div id="entity-table"></div>
+    </details>
+</div>
+
+<div class="card">
+    <h2>Place mentions</h2>
+    <div id="map"></div>
+</div>
+
+<div class="card">
+    <h2>Top speakers</h2>
+    <table>
+        <thead><tr><th>Speaker</th><th>Lok Sabha</th><th>Speeches</th><th>Avg. sentiment</th><th>Top topics</th></tr></thead>
+        <tbody>
+        {% for s in speaker_rows %}
+        <tr>
+            <td>{{ s.display_name }}</td>
+            <td>{{ s.lok_sabha_number }}</td>
+            <td>{{ s.speech_count }}</td>
+            <td>{{ "%+.2f"|format(s.avg_sentiment) if s.avg_sentiment is not none else "—" }}</td>
+            <td class="muted">{{ (s.top_topics | map(attribute='topic') | list | join(', ')) if s.top_topics else "—" }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<script id="topic-data" type="application/json">{{ topic_chart_json | safe }}</script>
+<script id="sentiment-data" type="application/json">{{ sentiment_chart_json | safe }}</script>
+<script id="entity-data" type="application/json">{{ entity_chart_json | safe }}</script>
+<script id="place-data" type="application/json">{{ place_rows_json | safe }}</script>
+
+<script>
+const root = getComputedStyle(document.documentElement);
+const cssvar = (name) => root.getPropertyValue(name).trim();
+const seriesColors = [1,2,3,4,5,6,7,8].map(i => cssvar(`--series-${i}`));
+const gridColor = cssvar('--grid');
+const inkSecondary = cssvar('--text-secondary');
+
+Chart.defaults.font.family = "system-ui, -apple-system, 'Segoe UI', sans-serif";
+Chart.defaults.color = inkSecondary;
+Chart.defaults.borderColor = gridColor;
+
+function readJSON(id) { return JSON.parse(document.getElementById(id).textContent); }
+
+// --- topic-over-time (categorical palette, one line per topic) ---
+const topicData = readJSON('topic-data');
+if (topicData.labels.length) {
+    new Chart(document.getElementById('topic-chart'), {
+        type: 'line',
+        data: {
+            labels: topicData.labels,
+            datasets: topicData.datasets.map((d, i) => ({
+                label: d.label, data: d.data,
+                borderColor: seriesColors[i % 8], backgroundColor: seriesColors[i % 8],
+                borderWidth: 2, pointRadius: 3, pointHoverRadius: 5, tension: 0.25,
+            })),
+        },
+        options: {
+            responsive: true,
+            interaction: { mode: 'nearest', axis: 'x', intersect: false },
+            plugins: { legend: { position: 'bottom' } },
+            scales: {
+                x: { grid: { display: false } },
+                y: { beginAtZero: true, grid: { color: gridColor } },
+            },
+        },
+    });
+    document.getElementById('topic-table').innerHTML = renderTable(
+        ['Month', ...topicData.datasets.map(d => d.label)],
+        topicData.labels.map((label, i) => [label, ...topicData.datasets.map(d => d.data[i])])
+    );
+}
+
+// --- sentiment-over-time: %composition, 100%-stacked (diverging: pos/neg poles + neutral midpoint) ---
+const sentimentData = readJSON('sentiment-data');
+// --diverge-mid is deliberately a surface-blending gray (a "zero" backdrop for
+// value scales) — not visible enough as its own stacked-bar segment, so the
+// neutral share uses the muted-ink token instead, which has real contrast on
+// both surfaces.
+const sentimentColor = { positive: cssvar('--diverge-pos'), neutral: cssvar('--text-muted'), negative: cssvar('--diverge-neg') };
+if (sentimentData.labels.length) {
+    new Chart(document.getElementById('sentiment-chart'), {
+        type: 'bar',
+        data: {
+            labels: sentimentData.labels,
+            datasets: sentimentData.datasets.map(d => ({
+                label: d.label, data: d.data,
+                backgroundColor: sentimentColor[d.key], maxBarThickness: 24,
+            })),
+        },
+        options: {
+            responsive: true,
+            plugins: {
+                legend: { position: 'bottom' },
+                tooltip: { callbacks: { label: (ctx) => `${ctx.dataset.label}: ${ctx.parsed.y}%` } },
+            },
+            scales: {
+                x: { stacked: true, grid: { display: false } },
+                y: { stacked: true, min: 0, max: 100, grid: { color: gridColor }, ticks: { callback: (v) => v + '%' } },
+            },
+        },
+    });
+}
+
+// --- top entities (sequential blue, magnitude) ---
+const entityData = readJSON('entity-data');
+if (entityData.labels.length) {
+    new Chart(document.getElementById('entity-chart'), {
+        type: 'bar',
+        data: {
+            labels: entityData.labels,
+            datasets: [{ data: entityData.data, backgroundColor: cssvar('--series-1'), borderRadius: 4, maxBarThickness: 24 }],
+        },
+        options: {
+            indexAxis: 'y',
+            plugins: { legend: { display: false } },
+            scales: {
+                x: { beginAtZero: true, grid: { color: gridColor } },
+                y: { grid: { display: false } },
+            },
+        },
+    });
+    document.getElementById('entity-table').innerHTML = renderTable(
+        ['Entity', 'Mentions'], entityData.labels.map((l, i) => [l, entityData.data[i]])
+    );
+}
+
+function renderTable(headers, rows) {
+    const thead = '<tr>' + headers.map(h => `<th>${h}</th>`).join('') + '</tr>';
+    const tbody = rows.map(r => '<tr>' + r.map(c => `<td>${c}</td>`).join('') + '</tr>').join('');
+    return `<table><thead>${thead}</thead><tbody>${tbody}</tbody></table>`;
+}
+
+// --- place mentions map ---
+const places = readJSON('place-data');
+const map = L.map('map').setView([22.5, 80], places.length ? 4 : 4);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '&copy; OpenStreetMap contributors', maxZoom: 12,
+}).addTo(map);
+const maxMentions = Math.max(1, ...places.map(p => p.mentions));
+places.forEach(p => {
+    const radius = 4 + 16 * (p.mentions / maxMentions);
+    L.circleMarker([p.lat, p.lon], {
+        radius, color: cssvar('--series-1'), fillColor: cssvar('--series-1'), fillOpacity: 0.35, weight: 1,
+    }).bindTooltip(`${p.address} — ${p.mentions} mention${p.mentions === 1 ? '' : 's'}`).addTo(map);
+});
+</script>
+{% endblock %}
