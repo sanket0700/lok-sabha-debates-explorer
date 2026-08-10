@@ -73,6 +73,11 @@
         .speech:last-child { border-bottom: none; }
         .speech-meta { color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 0.25rem; }
         details summary { cursor: pointer; color: var(--text-secondary); font-size: 0.85rem; }
+        footer {
+            max-width: 1100px; margin: 0 auto; padding: 1rem 1.5rem 2rem;
+            color: var(--text-muted); font-size: 0.8rem; line-height: 1.5;
+        }
+        footer a { color: inherit; }
     </style>
     {% block head %}{% endblock %}
 </head>
@@ -87,5 +92,14 @@
     <main>
         {% block content %}{% endblock %}
     </main>
+    <footer>
+        Pilot-scope proof of concept (15 sittings, LS16/17/18, ~2500 speeches) — not yet a
+        citable source. Hindi→English translation, entity/topic tagging, sentiment, rhetorical
+        mode, and geocoding are all produced by local machine-learning models and carry real,
+        measured error rates (not perfect accuracy) — treat results as a starting point for
+        further reading, not a verified transcript record. See
+        <a href="https://github.com/sanket0700/lok-sabha-debates-explorer#known-limitations-see-progressmd-and-claudemd-for-detail" target="_blank" rel="noopener">known limitations</a>
+        for the full, specific accounting.
+    </footer>
 </body>
 </html>

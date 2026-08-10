@@ -1,0 +1,12 @@
+# Minimal deps for `pytest tests/` in CI — deliberately NOT the full
+# requirements.txt. The current test suite only exercises pure Python/regex
+# logic (pipeline/segment.py, pipeline/speakers.py, pipeline/enrich_rhetoric.py's
+# structural bypass patterns), never loads a model, so it doesn't need
+# torch/transformers/spacy/etc. — installing those on every CI run would be
+# a multi-GB download for tests that never touch them. If a future test
+# needs a real model or DB, add its deps here explicitly rather than
+# switching this file back to the full requirements.txt by default.
+psycopg2-binary==2.9.9
+pgvector==0.3.6
+requests==2.32.3
+pytest==8.3.3
