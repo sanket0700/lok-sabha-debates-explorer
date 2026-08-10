@@ -63,6 +63,32 @@ def _sentiment_chart_json(rows):
     return json.dumps({"labels": [p.isoformat() for p in periods], "datasets": datasets})
 
 
+def _rhetoric_chart_json(rows):
+    """%composition per period across the 5 rhetorical-mode labels — same
+    reasoning as _sentiment_chart_json: a monthly bucket's real composition
+    (e.g. 40% critical / 35% supportive / 25% procedural) is the signal,
+    not a single dominant/averaged label that would hide it.
+    """
+    periods = sorted({r["period_start"] for r in rows})
+    labels = ["supportive", "critical", "constructive", "confrontational", "procedural"]
+    totals_by_period = {p: {l: 0 for l in labels} for p in periods}
+    for r in rows:
+        bucket = totals_by_period[r["period_start"]]
+        for l in labels:
+            bucket[l] += r[f"{l}_count"]
+
+    def pct(period, label):
+        bucket = totals_by_period[period]
+        total = sum(bucket.values())
+        return round(100 * bucket[label] / total, 1) if total else 0
+
+    datasets = [
+        {"label": l.capitalize(), "key": l, "data": [pct(p, l) for p in periods]}
+        for l in labels
+    ]
+    return json.dumps({"labels": [p.isoformat() for p in periods], "datasets": datasets})
+
+
 def _entity_chart_json(rows):
     return json.dumps(
         {
@@ -108,6 +134,18 @@ def insights_page(request: Request, lok_sabha: int | None = None):
             """,
             {"ls": lok_sabha},
         )
+        rhetoric_rows = fetch_all(
+            conn,
+            """
+            select lok_sabha_number, period_start, speech_count,
+                   supportive_count, critical_count, constructive_count,
+                   confrontational_count, procedural_count
+            from rhetoric_trends
+            where %(ls)s is null or lok_sabha_number = %(ls)s
+            order by period_start
+            """,
+            {"ls": lok_sabha},
+        )
         speaker_rows = fetch_all(
             conn,
             """
@@ -143,11 +181,12 @@ def insights_page(request: Request, lok_sabha: int | None = None):
             "lok_sabha_numbers": LOK_SABHA_NUMBERS,
             "topic_chart_json": _topic_chart_json(topic_rows),
             "sentiment_chart_json": _sentiment_chart_json(sentiment_rows),
+            "rhetoric_chart_json": _rhetoric_chart_json(rhetoric_rows),
             "entity_chart_json": _entity_chart_json(entity_rows),
             "place_rows_json": json.dumps(
                 [dict(lat=r["lat"], lon=r["lon"], mentions=r["mentions"], address=r["formatted_address"]) for r in place_rows]
             ),
             "speaker_rows": speaker_rows,
-            "has_data": bool(topic_rows or entity_rows or sentiment_rows or speaker_rows),
+            "has_data": bool(topic_rows or entity_rows or sentiment_rows or rhetoric_rows or speaker_rows),
         },
     )

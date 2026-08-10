@@ -56,6 +56,27 @@ where si.sitting_date is not null
 group by si.lok_sabha_number, date_trunc('month', si.sitting_date);
 """
 
+RHETORIC_TRENDS_SQL = """
+truncate rhetoric_trends;
+insert into rhetoric_trends
+    (lok_sabha_number, period_start, speech_count,
+     supportive_count, critical_count, constructive_count, confrontational_count, procedural_count)
+select si.lok_sabha_number, date_trunc('month', si.sitting_date)::date, count(*),
+       count(*) filter (where r.label = 'supportive'),
+       count(*) filter (where r.label = 'critical'),
+       count(*) filter (where r.label = 'constructive'),
+       count(*) filter (where r.label = 'confrontational'),
+       count(*) filter (where r.label = 'procedural')
+from rhetoric r
+join speeches sp on sp.id = r.speech_id
+join sittings si on si.id = sp.sitting_id
+-- 'too_short' speeches were deliberately never classified (see
+-- enrich_rhetoric.py's RHETORIC_MIN_CHARS) — excluded here rather than
+-- counted as an implicit sixth category the dashboard would need to explain.
+where si.sitting_date is not null and r.label != 'too_short'
+group by si.lok_sabha_number, date_trunc('month', si.sitting_date);
+"""
+
 SPEAKER_STATS_SQL = """
 truncate speaker_stats;
 with topic_counts as (
@@ -109,6 +130,7 @@ def run():
                 ("topic_trends", TOPIC_TRENDS_SQL, None),
                 ("entity_trends", ENTITY_TRENDS_SQL, {"entity_types": list(ENTITY_TYPES_FOR_TRENDS)}),
                 ("sentiment_trends", SENTIMENT_TRENDS_SQL, None),
+                ("rhetoric_trends", RHETORIC_TRENDS_SQL, None),
                 ("speaker_stats", SPEAKER_STATS_SQL, None),
             ]:
                 log.info("rebuilding %s...", name)

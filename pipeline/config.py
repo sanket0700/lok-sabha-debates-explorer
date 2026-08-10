@@ -108,6 +108,32 @@ TOPIC_TAXONOMY = [
 
 ENTITY_TYPES_TO_GEOCODE = {"GPE", "LOC", "FAC"}
 
+# --- rhetorical-mode taxonomy (pipeline/enrich_rhetoric.py) ---------------
+# Parliamentary speech isn't well described by generic positive/negative
+# sentiment (a substantive, well-argued critique of a policy reads as
+# "negative" even though it's exactly what opposition scrutiny is supposed
+# to look like) — this is a single-label classification of what the speaker
+# is *doing* rhetorically, not how the text sounds. Keys are the short label
+# stored in the DB; values are the phrasing actually sent to the zero-shot
+# classifier, which needed to be more specific than a bare adjective to
+# discriminate well (confirmed by hand: "critical" alone scored high on
+# almost everything, including neutral procedural text).
+RHETORIC_TAXONOMY: dict[str, str] = {
+    "supportive": "praising or expressing support",
+    "critical": "raising a concern or criticism",
+    "constructive": "proposing a constructive solution",
+    "confrontational": "confrontational or attacking in tone",
+    "procedural": "a neutral factual or procedural statement",
+}
+
+# Below this length, a "speech" is usually a bare interjection ("Why is that
+# relevant?") with no real rhetorical content to classify — confirmed by
+# hand that the classifier still returns a confident-looking score on these,
+# which overstates how much signal is actually there. No label is stored at
+# all below this threshold, mirroring how NER/topic tagging can legitimately
+# produce nothing for a speech rather than force a low-information guess.
+RHETORIC_MIN_CHARS = 40
+
 # spaCy entity types worth showing in a "most-mentioned entities" insight — excludes
 # CARDINAL/ORDINAL/DATE/TIME/PERCENT/QUANTITY/MONEY, which are numeric/temporal values
 # spaCy tags as "entities" but aren't meaningful subjects for a who/what-is-discussed

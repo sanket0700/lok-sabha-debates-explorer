@@ -42,6 +42,20 @@
 </div>
 
 <div class="card">
+    <h2>Rhetorical mode over time</h2>
+    <p class="muted">What speakers are <em>doing</em> rhetorically, not how the text sounds —
+    positive/negative sentiment isn't a good fit for parliamentary debate, since a substantive,
+    well-argued critique of a policy reads as "negative" tone even though it's exactly what
+    opposition scrutiny is supposed to look like. Most of this corpus (~56%) is recognizable
+    procedural boilerplate (Written Questions, formal motions, structured written answers, the
+    presiding officer managing order) and is classified that way directly rather than left to a
+    model to guess; the remainder is classified by a local zero-shot model, with speaker-role
+    context (e.g. a sitting minister explaining their own policy) factored in where known. See
+    <code>PROGRESS.md</code> for the full methodology and known limitations.</p>
+    <canvas id="rhetoric-chart" height="90"></canvas>
+</div>
+
+<div class="card">
     <h2>Most-mentioned entities</h2>
     <canvas id="entity-chart" height="140"></canvas>
     <details>
@@ -75,6 +89,7 @@
 
 <script id="topic-data" type="application/json">{{ topic_chart_json | safe }}</script>
 <script id="sentiment-data" type="application/json">{{ sentiment_chart_json | safe }}</script>
+<script id="rhetoric-data" type="application/json">{{ rhetoric_chart_json | safe }}</script>
 <script id="entity-data" type="application/json">{{ entity_chart_json | safe }}</script>
 <script id="place-data" type="application/json">{{ place_rows_json | safe }}</script>
 
@@ -135,6 +150,34 @@ if (sentimentData.labels.length) {
             datasets: sentimentData.datasets.map(d => ({
                 label: d.label, data: d.data,
                 backgroundColor: sentimentColor[d.key], maxBarThickness: 24,
+            })),
+        },
+        options: {
+            responsive: true,
+            plugins: {
+                legend: { position: 'bottom' },
+                tooltip: { callbacks: { label: (ctx) => `${ctx.dataset.label}: ${ctx.parsed.y}%` } },
+            },
+            scales: {
+                x: { stacked: true, grid: { display: false } },
+                y: { stacked: true, min: 0, max: 100, grid: { color: gridColor }, ticks: { callback: (v) => v + '%' } },
+            },
+        },
+    });
+}
+
+// --- rhetorical mode over time: %composition, 100%-stacked (categorical,
+// not diverging — these are 5 distinct modes, not a positive/negative
+// spectrum with a neutral midpoint like sentiment) ---
+const rhetoricData = readJSON('rhetoric-data');
+if (rhetoricData.labels.length) {
+    new Chart(document.getElementById('rhetoric-chart'), {
+        type: 'bar',
+        data: {
+            labels: rhetoricData.labels,
+            datasets: rhetoricData.datasets.map((d, i) => ({
+                label: d.label, data: d.data,
+                backgroundColor: seriesColors[i % 8], maxBarThickness: 24,
             })),
         },
         options: {

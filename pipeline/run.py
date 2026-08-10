@@ -18,6 +18,7 @@ from pipeline import (
     embed,
     enrich_geocode,
     enrich_ner,
+    enrich_rhetoric,
     enrich_sentiment,
     enrich_topic,
     extract,
@@ -30,7 +31,10 @@ from pipeline.db import fetch_all, get_conn
 log = logging.getLogger("pipeline.run")
 
 # Order matters: each stage depends on the previous one's output.
-STAGES = ["scrape", "extract", "segment", "translate", "ner", "geocode", "topic", "sentiment", "embed", "aggregate"]
+STAGES = [
+    "scrape", "extract", "segment", "translate", "ner", "geocode",
+    "topic", "sentiment", "rhetoric", "embed", "aggregate",
+]
 
 
 def run_stage(stage: str, lok_sabha: int | None, limit: int | None, dry_run: bool):
@@ -53,6 +57,8 @@ def run_stage(stage: str, lok_sabha: int | None, limit: int | None, dry_run: boo
         enrich_topic.run(lok_sabha, limit)
     elif stage == "sentiment":
         enrich_sentiment.run(lok_sabha, limit)
+    elif stage == "rhetoric":
+        enrich_rhetoric.run(lok_sabha, limit)
     elif stage == "embed":
         embed.run(lok_sabha, limit)
     elif stage == "aggregate":
@@ -93,6 +99,7 @@ def print_status():
                 count(ner_processed_at) as ner_done,
                 count(topics_processed_at) as topics_done,
                 (select count(*) from sentiment) as sentiment_done,
+                (select count(*) from rhetoric) as rhetoric_done,
                 (select count(*) from speech_embeddings) as embeddings_done
             from speeches
             """,

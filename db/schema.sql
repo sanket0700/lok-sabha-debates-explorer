@@ -127,6 +127,19 @@ create table if not exists sentiment (
     label               text not null                   -- negative / neutral / positive
 );
 
+create table if not exists rhetoric (
+    speech_id           bigint primary key references speeches(id) on delete cascade,
+    label               text not null,                 -- supportive / critical / constructive / confrontational / procedural
+    score               real,                           -- classifier confidence; null for structurally-bypassed speeches
+    -- How the label was derived — kept for transparency/debugging, not
+    -- shown in the UI. 'bypass:<pattern>' (a recognizable procedural
+    -- structure short-circuited the classifier entirely), 'minister:<role>'
+    -- (a known Council of Ministers member, role-context injected into the
+    -- classifier input), or 'plain' (ordinary classifier run).
+    method              text not null,
+    tagged_at           timestamptz not null default now()
+);
+
 create table if not exists speech_embeddings (
     speech_id           bigint primary key references speeches(id) on delete cascade,
     embedding           vector(384) not null
@@ -172,6 +185,23 @@ create table if not exists sentiment_trends (
     positive_count        integer not null default 0,
     neutral_count         integer not null default 0,
     negative_count        integer not null default 0,
+    primary key (lok_sabha_number, period_start)
+);
+
+create table if not exists rhetoric_trends (
+    lok_sabha_number        smallint not null,
+    period_start             date not null,
+    speech_count              integer not null,
+    -- Per-label counts, not an averaged/dominant-label summary — same
+    -- reasoning as sentiment_trends' positive/neutral/negative_count: a
+    -- single "most common" label per bucket would hide the real
+    -- composition (e.g. a bucket that's 40% critical / 35% supportive /
+    -- 25% procedural collapsing to just "critical").
+    supportive_count          integer not null default 0,
+    critical_count             integer not null default 0,
+    constructive_count          integer not null default 0,
+    confrontational_count        integer not null default 0,
+    procedural_count              integer not null default 0,
     primary key (lok_sabha_number, period_start)
 );
 

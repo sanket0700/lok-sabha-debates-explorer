@@ -21,7 +21,7 @@ scrape (elibrary.sansad.in DSpace REST API, LS18+LS17+LS16)
    → extract raw text (PyMuPDF; OCR fallback for image-only pages)
    → segment into speeches (heuristics + local-LLM fallback via Ollama)
    → translate Hindi→English (IndicTrans2, local)
-   → enrich (NER, geocode, topic tag, sentiment) — all on the English text
+   → enrich (NER, geocode, topic tag, sentiment, rhetorical mode) — all on the English text
    → embed (local sentence-embedding model) → Postgres + pgvector
    → aggregate (precomputed trend tables)
    → serve via FastAPI: Explore (search + RAG chat) and Insights (dashboards)
@@ -111,6 +111,19 @@ scrape/process the rest of LS16, LS17, and LS18.
 - Translation (IndicTrans2, greedy decoding to fit consumer-hardware memory) is generally
   accurate on real spot-checks but has a known degenerate-repetition failure mode on short
   repeated phrases, mitigated (not eliminated) with a repetition penalty + n-gram blocking.
+- Rhetorical-mode classification (`pipeline/enrich_rhetoric.py`) replaces generic positive/
+  negative sentiment as the primary "tone" signal in Insights, since sentiment analysis is a
+  poor fit for parliamentary debate (a substantive critique reads as "negative" even though
+  it's exactly what opposition scrutiny is supposed to look like). Structural pattern-matching
+  resolves ~56% of the corpus confidently (procedural boilerplate — Written Questions, formal
+  motions, structured written answers, the presiding officer managing order); the remainder goes
+  through a local zero-shot classifier, with speaker-role context factored in for a
+  hand-verified, date-scoped list of current Union Ministers (see `pipeline/speakers.py`).
+  Confirmed by hand on real samples that this is meaningfully more reliable than the model
+  alone, but not perfect: known residual gaps include rare OCR-garbled boilerplate variants,
+  overconfident labels on very short interjections (mitigated with a minimum-length cutoff,
+  not eliminated), and no verified minister-role data for earlier Lok Sabha terms (LS16/17) —
+  those speeches get the plain classifier only, deliberately, rather than a guessed role bias.
 - The pilot corpus (15 sittings across LS16/17/18, ~2500 speeches) is a proof of concept, not
   yet a citable source — see `PROGRESS.md` for the full, honest accounting of what's been
   measured and what hasn't at this scale.
