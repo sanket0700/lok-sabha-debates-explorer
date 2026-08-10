@@ -44,7 +44,12 @@ def ensure_topics(conn) -> dict:
     return {r["name"]: r["id"] for r in rows}
 
 
-def run(lok_sabha_number: int | None, limit: int | None, batch_size: int = 8):
+def run(
+    lok_sabha_number: int | None,
+    limit: int | None,
+    batch_size: int = 8,
+    sitting_ids: list[int] | None = None,
+):
     classifier = _load()
     with get_conn() as conn:
         topic_ids = ensure_topics(conn)
@@ -57,6 +62,12 @@ def run(lok_sabha_number: int | None, limit: int | None, batch_size: int = 8):
         if lok_sabha_number is not None:
             query += " and sitting_id in (select id from sittings where lok_sabha_number = %s)"
             params.append(lok_sabha_number)
+        # See pipeline/translate.py's --sitting-id for why: lets multiple
+        # concurrent workers sharing one DB split the backlog by sitting
+        # without racing on the same rows.
+        if sitting_ids:
+            query += " and sitting_id = any(%s)"
+            params.append(sitting_ids)
         query += " order by id"
         if limit is not None:
             query += " limit %s"
@@ -101,12 +112,13 @@ def run(lok_sabha_number: int | None, limit: int | None, batch_size: int = 8):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--lok-sabha", type=int, default=None)
+    parser.add_argument("--sitting-id", type=int, action="append", default=None)
     parser.add_argument("--limit", type=int, default=None)
     parser.add_argument("--batch-size", type=int, default=8)
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args()
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO)
-    run(args.lok_sabha, args.limit, args.batch_size)
+    run(args.lok_sabha, args.limit, args.batch_size, args.sitting_id)
 
 
 if __name__ == "__main__":
