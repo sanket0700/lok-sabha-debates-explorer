@@ -1,5 +1,8 @@
 # Lok Sabha Debates Explorer
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![PRs welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
+
 A rebuild of the original *Analysis of Lok Sabha Dataset* project: a bilingual
 (Hindi/English), speech-level corpus of Lok Sabha debates, with two ways to use it —
 **Insights** (topic, entity, and sentiment/tone trends over time) and **Explore**
@@ -92,8 +95,34 @@ scrape/process the rest of LS16, LS17, and LS18.
 - `pipeline/scrape.py` targets `elibrary.sansad.in`'s DSpace 7 REST API (the original
   `eparlib.nic.in` it mirrored was retired and migrated there) — the collection scope UUID and
   `loksabhanumber` facet filter were confirmed by hand against the live API, but could still
-  drift if the site is restructured; verify with `--dry-run --limit 5` before a real run.
-- Segmentation's LLM fallback (for oversized/ambiguous speaker-boundary matches) costs real
+  drift if the site is restructured; verify with `--dry-run --limit 5` before a real run. Bounded
+  retry-with-backoff plus an end-of-run failure summary are in place for transient errors.
+- Segmentation's LLM fallback (for genuinely ambiguous, unlabeled-boundary text) costs real
   time — measured at ~140s/call for `llama3.1:8b-instruct-q4_K_M` on a ~6000-character chunk.
-  Full-day sittings with many such matches can need dozens of calls; budget accordingly before
-  scraping/segmenting at volume.
+  A structured accuracy audit (55-boundary sample) found and fixed real regex-coverage gaps and
+  an LLM-hallucination failure mode; fallback usage on the pilot corpus is now near-zero.
+- Geocoding resolves ~87% of extracted place-like entities; the remainder is a mix of generic
+  non-place phrases, real places Nominatim's free-text search doesn't match well, and residual
+  NER/OCR noise — confirmed by direct inspection, not assumed. A persistent `geocode_cache` table
+  means re-runs don't re-fetch already-resolved (or already-confirmed-unresolvable) places.
+- Sentiment/topic tagging use real tokenizer-based truncation (not a character-count proxy) —
+  even so, roughly 22% of speeches (sentiment) / 13% (topic) still exceed each model's native
+  context window and get truncated; chunk-and-aggregate scoring for long speeches is a real,
+  not-yet-done improvement.
+- Translation (IndicTrans2, greedy decoding to fit consumer-hardware memory) is generally
+  accurate on real spot-checks but has a known degenerate-repetition failure mode on short
+  repeated phrases, mitigated (not eliminated) with a repetition penalty + n-gram blocking.
+- The pilot corpus (15 sittings across LS16/17/18, ~2500 speeches) is a proof of concept, not
+  yet a citable source — see `PROGRESS.md` for the full, honest accounting of what's been
+  measured and what hasn't at this scale.
+
+## Contributing
+
+Contributions are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for how to get set up, the
+branch/PR workflow, and where to look first (the "Known limitations" list above and
+`PROGRESS.md`'s ranked issue list are good starting points). This project follows the
+[Contributor Covenant](CODE_OF_CONDUCT.md).
+
+## License
+
+MIT — see [LICENSE](LICENSE).
