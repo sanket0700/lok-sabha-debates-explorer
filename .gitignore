@@ -6,3 +6,10 @@ data/
 backups/
 .env
 *.egg-info/
+
+# Local-only working notes for AI-assisted development on this project — not
+# meant for public consumption (internal reasoning trail, absolute local
+# paths, references to unrelated projects). Kept on disk for continuity
+# across sessions, never tracked or pushed.
+CLAUDE.md
+PROGRESS.md

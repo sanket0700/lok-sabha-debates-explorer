@@ -43,9 +43,8 @@ acceleration only when run natively. `pipeline/config.get_device()` auto-picks `
 Silicon (falls back to `cuda`, then `cpu` elsewhere).
 
 ```bash
-docker compose up -d db                       # Postgres+pgvector on host port 5433 (not 5432 —
-                                                # already taken by an unrelated container on the
-                                                # dev machine this was built on); schema auto-loads
+docker compose up -d db                       # Postgres+pgvector on host port 5433 (not the default
+                                                # 5432, in case that's already in use); schema auto-loads
 
 python3 -m venv .venv && source .venv/bin/activate   # use Python 3.12, not a brand-new release —
 pip install -r requirements.txt                      # ML-package wheel availability lags behind
